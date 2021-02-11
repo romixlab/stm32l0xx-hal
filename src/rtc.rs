@@ -3,6 +3,7 @@
 //! See STM32L0x2 reference manual, chapter 26.
 
 use void::Void;
+use crate::time::Hertz;
 
 use crate::{
     hal::timer::{self, Cancel as _},
@@ -11,11 +12,20 @@ use crate::{
     rcc::Rcc,
     time::U32Ext,
 };
+use core::convert::TryInto;
 
 /// Entry point to the RTC API
 pub struct RTC {
     rtc: pac::RTC,
     read_twice: bool,
+    rtc_clk: Hertz,
+}
+
+pub enum ClockSource {
+    // NoClock,
+    LSE,
+    LSI,
+    // HSE
 }
 
 impl RTC {
@@ -30,37 +40,45 @@ impl RTC {
     /// Panics, if the ABP1 clock frequency is lower than the RTC clock
     /// frequency. The RTC is currently hardcoded to use the LSE as clock source
     /// which runs at 32768 Hz.
-    pub fn new(rtc: pac::RTC, rcc: &mut Rcc, _: &PWR, init: Instant) -> Self {
+    pub fn new(rtc: pac::RTC, rcc: &mut Rcc, clock_source: ClockSource, _: &PWR, init: Instant) -> Self {
         // Backup write protection must be disabled by setting th DBP bit in
         // PWR_CR, otherwise it's not possible to access the RTC registers. We
         // assume that this was done during PWR initialization. To make sure it
         // already happened, this function requires a reference to PWR.
 
-        // Select the LSE clock as the clock source for the RTC clock, as that's
-        // the only source that keeps the RTC clocked and functional over system
-        // resets.
-        // Other clock sources are currently not supported.
-        //
-        // ATTENTION:
-        // The prescaler settings in `set` assume that the LSE is selected, and
-        // that the frequency is 32768 Hz. If you change the clock selection
-        // here, you have to adapt the prescaler settings too.
-        rcc.rb.csr.modify(|_, w| {
-            // Select LSE as RTC clock source.
-            // This is safe, as we're writing a valid bit pattern.
-            w.rtcsel().bits(0b01);
-            // Enable RTC clock
-            w.rtcen().set_bit();
-            // Enable LSE clock
-            w.lseon().set_bit()
-        });
+        let rtc_clk = match clock_source {
+            ClockSource::LSE => {
+                rcc.rb.csr.modify(|_, w| {
+                    // Select LSE as RTC clock source.
+                    // This is safe, as we're writing a valid bit pattern.
+                    w.rtcsel().bits(0b01);
+                    // Enable RTC clock
+                    w.rtcen().set_bit();
+                    // Enable LSE clock
+                    w.lseon().set_bit()
+                });
 
-        // Wait for LSE to be ready
-        while rcc.rb.csr.read().lserdy().bit_is_clear() {}
+                // Wait for LSE to be ready
+                while rcc.rb.csr.read().lserdy().bit_is_clear() {}
+                32_768u32.hz() // LSE crystal frequency
+            },
+            ClockSource::LSI => {
+                rcc.rb.csr.modify(|_, w| {
+                    // Select LSI as RTC clock source
+                    w.rtcsel().bits(0b10);
+                    // Enable RTC clock
+                    w.rtcen().set_bit();
+                    // Enable LSI clock
+                    w.lsion().set_bit()
+                });
+
+                // Wait for LSI to be ready
+                while rcc.rb.csr.read().lsirdy().bit_is_clear() {}
+                38_000u32.hz() // LSI nominal frequency
+            }
+        };
 
         let apb1_clk = rcc.clocks.apb1_clk();
-        let rtc_clk = 32_768u32.hz(); // LSE crystal frequency
-
         // The APB1 clock must not be slower than the RTC clock.
         if apb1_clk < rtc_clk {
             panic!(
@@ -73,7 +91,7 @@ impl RTC {
         // frequency, special care must be taken when reading some registers.
         let read_twice = apb1_clk.0 < 7 * rtc_clk.0;
 
-        let mut rtc = RTC { rtc, read_twice };
+        let mut rtc = RTC { rtc, read_twice, rtc_clk };
 
         if rtc.rtc.isr.read().inits().bit_is_clear() {
             // RTC not yet initialized. Do that now.
@@ -96,6 +114,7 @@ impl RTC {
 
     /// Sets the date/time
     pub fn set(&mut self, instant: Instant) {
+        let rtc_clk = self.rtc_clk;
         self.write(|rtc| {
             // Start initialization
             rtc.isr.modify(|_, w| w.init().set_bit());
@@ -108,14 +127,10 @@ impl RTC {
 
             // Configure the prescaler to generate a 1 Hz clock for the
             // calendar.
-            //
-            // ATTENTION:
-            // This assumes the RTC clock frequency is 32768 Hz. If this
-            // assumption holds no longer true, you need to change this code.
             rtc.prer.write(|w|
                 // Safe, because we're only writing valid values to the fields.
                 unsafe {
-                    w.prediv_a().bits(0x7f);
+                    w.prediv_a().bits((rtc_clk.0 / 256 - 1).try_into().unwrap_or(0xff));
                     w.prediv_s().bits(0xff)
                 });
 
@@ -265,8 +280,8 @@ impl RTC {
     }
 
     fn write<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&pac::RTC) -> R,
+        where
+            F: FnOnce(&pac::RTC) -> R,
     {
         // Disable write protection.
         // This is safe, as we're only writin the correct and expected values.
@@ -463,8 +478,8 @@ impl timer::CountDown for WakeupTimer<'_> {
     /// The `delay` argument must be in the range `1 <= delay <= 2^17`.
     /// Panics, if `delay` is outside of that range.
     fn start<T>(&mut self, delay: T)
-    where
-        T: Into<Self::Time>,
+        where
+            T: Into<Self::Time>,
     {
         let delay = delay.into();
         assert!(1 <= delay && delay <= 2 ^ 17);

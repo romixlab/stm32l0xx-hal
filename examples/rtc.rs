@@ -21,7 +21,7 @@ use stm32l0xx_hal::{
     prelude::*,
     pwr::PWR,
     rcc,
-    rtc::{Instant, RTC},
+    rtc::{Instant, RTC, ClockSource as RtcClockSource},
     serial,
 };
 
@@ -55,7 +55,7 @@ fn main() -> ! {
         .set_minute(36)
         .set_second(0);
 
-    let mut rtc = RTC::new(dp.RTC, &mut rcc, &mut pwr, instant);
+    let mut rtc = RTC::new(dp.RTC, &mut rcc, RtcClockSource::LSE, &mut pwr, instant);
 
     loop {
         let mut instant = rtc.now();
