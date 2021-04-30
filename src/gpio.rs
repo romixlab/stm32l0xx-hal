@@ -143,7 +143,7 @@ macro_rules! gpio {
             use super::{
                 Floating, GpioExt, Input, OpenDrain, Output, Speed,
                 PullDown, PullUp, PushPull, AltMode, Analog, Port,
-                PinMode,
+                PinMode, AnyOutputPin, AnyInputPin,
             };
 
             /// GPIO parts
@@ -502,6 +502,13 @@ macro_rules! gpio {
                             _mode: self._mode,
                         }
                     }
+
+                    pub fn downgrade_any(self) -> AnyOutputPin {
+                        AnyOutputPin {
+                            port: self.port(),
+                            pin_number: self.pin_number(),
+                        }
+                    }
                 }
 
                 impl<MODE> OutputPin for $PXi<Output<MODE>> {
@@ -521,7 +528,6 @@ macro_rules! gpio {
                 }
 
                 impl<MODE> StatefulOutputPin for $PXi<Output<MODE>> {
-
                     fn is_set_high(&self) -> Result<bool, Self::Error> {
                         let is_set_high = !self.is_set_low()?;
                         Ok(is_set_high)
@@ -560,6 +566,13 @@ macro_rules! gpio {
                         $PXx {
                             i: $i,
                             _mode: self._mode,
+                        }
+                    }
+
+                    pub fn downgrade_any(self) -> AnyInputPin {
+                        AnyInputPin {
+                            port: self.port(),
+                            pin_number: self.pin_number(),
                         }
                     }
                 }
@@ -684,3 +697,39 @@ gpio!(GPIOH, gpioh, iophen, PH, [
     PH9: (ph9, 9, Analog),
     PH10: (ph10, 10, Analog),
 ]);
+
+pub struct AnyOutputPin {
+    port: Port,
+    pin_number: u8,
+}
+
+impl AnyOutputPin {
+    pub fn downgrade(self) -> AnyPin {
+        AnyPin {
+            port: self.port,
+            pin_number: self.pin_number,
+        }
+    }
+}
+
+pub struct AnyInputPin {
+    port: Port,
+    pin_number: u8,
+}
+
+impl AnyInputPin {
+    pub fn downgrade(self) -> AnyPin {
+        AnyPin {
+            port: self.port,
+            pin_number: self.pin_number,
+        }
+    }
+}
+
+pub struct AnyPin {
+    port: Port,
+    pin_number: u8
+}
+
+impl AnyPin {
+}
