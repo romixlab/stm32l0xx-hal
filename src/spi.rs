@@ -1,5 +1,5 @@
 use crate::gpio::gpioa::*;
-#[cfg(any(feature = "stm32l0x2", feature = "stm32l0x3"))]
+#[cfg(any(feature = "stm32l0x1", feature = "stm32l0x2", feature = "stm32l0x3"))]
 use crate::gpio::gpiob::*;
 
 use crate::gpio::{AltMode, Analog};
@@ -146,15 +146,18 @@ pins! {
     SPI1:
         SCK: [
             [NoSck, None],
-            [PA5<Analog>, AltMode::AF0]
+            [PA5<Analog>, AltMode::AF0],
+            [PB3<Analog>, AltMode::AF0]
         ]
         MISO: [
             [NoMiso, None],
-            [PA6<Analog>, AltMode::AF0]
+            [PA6<Analog>, AltMode::AF0],
+            [PA11<Analog>, AltMode::AF0]
         ]
         MOSI: [
             [NoMosi, None],
-            [PA7<Analog>, AltMode::AF0]
+            [PA7<Analog>, AltMode::AF0],
+            [PA12<Analog>, AltMode::AF0]
         ]
 }
 
