@@ -64,3 +64,4 @@ pub mod timer;
 ))]
 pub mod usb;
 pub mod watchdog;
+pub mod signature;
