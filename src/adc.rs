@@ -17,6 +17,8 @@ use crate::{
 
 use crate::dma::{self, Buffer as _};
 
+use crate::signature::{VDDA_CALIB_MV, VtempCal30, VtempCal130, VrefCal};
+
 pub trait AdcExt {
     fn constrain(self, rcc: &mut Rcc) -> Adc<Ready>;
 }
@@ -56,6 +58,16 @@ pub enum Precision {
     B_6 = 0b11,
 }
 
+impl Precision {
+    fn to_max_count(&self) -> u32 {
+        match self {
+            Precision::B_12 => (1 << 12) - 1,
+            Precision::B_10 => (1 << 10) - 1,
+            Precision::B_8 => (1 << 8) - 1,
+            Precision::B_6 => (1 << 6) - 1,
+        }
+    }
+}
 /// ADC Sampling time
 #[derive(Copy, Clone, PartialEq)]
 pub enum SampleTime {
@@ -91,21 +103,26 @@ pub struct Adc<State> {
     align: Align,
     precision: Precision,
     _state: State,
+    calibrated_vdda: u32,
 }
 
 impl Adc<Ready> {
-    pub fn new(adc: ADC, rcc: &mut Rcc) -> Self {
+    pub fn new(mut adc: ADC, rcc: &mut Rcc) -> Self {
         // Enable ADC clocks
         rcc.rb.apb2enr.modify(|_, w| w.adcen().set_bit());
         adc.cr.modify(|_, w| w.advregen().set_bit());
+        Self::calibrate_offset(&mut adc);
 
-        Self {
+        let mut s = Self {
             rb: adc,
             sample_time: SampleTime::T_1_5,
             align: Align::Right,
             precision: Precision::B_12,
             _state: Ready,
-        }
+            calibrated_vdda: 0
+        };
+        Self::calibrate_vdda(&mut s);
+        s
     }
 
     /// Set the Adc sampling time
@@ -211,7 +228,49 @@ impl Adc<Ready> {
                 buffer: buffer_unsafe,
                 transfer,
             },
+            calibrated_vdda: self.calibrated_vdda
         }
+    }
+
+    fn calibrate_offset(adc: &mut ADC) {
+        adc.cfgr2.modify(|_, w| w.ckmode().pclk());
+        adc.cr.modify(|_, w| w.adcal().set_bit());
+        while adc.cr.read().adcal().bit_is_set() {}
+    }
+
+    /// Calculates the system VDDA by sampling the internal VREF channel and comparing
+    /// the result with the value stored at the factory. If the chip's VDDA is not stable, run
+    /// this before each ADC conversion.
+    pub fn calibrate_vdda(&mut self) {
+        let vref_cal = VrefCal::get().read();
+        let old_sample_time = self.sample_time;
+
+        // "Table 24. Embedded internal voltage reference" states that the sample time needs to be
+        // at a minimum 4 us. With 640.5 ADC cycles we have a minimum of 8 us at 80 MHz, leaving
+        // some headroom.
+        self.set_sample_time(SampleTime::T_160_5);
+
+        let mut vref_channel = VRef::new();
+        vref_channel.enable(self);
+        // This can't actually fail, it's just in a result to satisfy hal trait
+        let vref_samp = (self.read(&mut vref_channel) as Result<u32, _>).unwrap();
+        vref_channel.disable(self);
+
+        self.set_sample_time(old_sample_time);
+
+        self.calibrated_vdda = (VDDA_CALIB_MV * u32::from(vref_cal)) / u32::from(vref_samp);
+    }
+
+    /// Convert a measurement to millivolts
+    pub fn to_millivolts(&self, sample: u16) -> u16 {
+        ((u32::from(sample) * self.calibrated_vdda) / self.precision.to_max_count()) as u16
+    }
+
+    /// Convert a raw sample from the `Temperature` to deg C
+    pub fn to_degrees_centigrade(sample: u16) -> f32 {
+        (130.0 - 30.0) / (VtempCal130::get().read() as f32 - VtempCal30::get().read() as f32)
+            * (sample as f32 - VtempCal30::get().read() as f32)
+            + 30.0
     }
 }
 
