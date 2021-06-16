@@ -267,10 +267,10 @@ impl Adc<Ready> {
     }
 
     /// Convert a raw sample from the `Temperature` to deg C
-    pub fn to_degrees_centigrade(sample: u16) -> f32 {
-        (130.0 - 30.0) / (VtempCal130::get().read() as f32 - VtempCal30::get().read() as f32)
-            * (sample as f32 - VtempCal30::get().read() as f32)
-            + 30.0
+    pub fn to_degrees_centigrade(sample: u16) -> i16 {
+        (130 - 30) * (sample as i16 - VtempCal30::get().read() as i16)
+            / (VtempCal130::get().read() as i16 - VtempCal30::get().read() as i16)
+            + 30
     }
 }
 
