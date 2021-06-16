@@ -247,7 +247,10 @@ macro_rules! spi {
                     Spi { spi, pins }
                 }
 
-                pub fn free(self) -> ($SPIX, PINS) {
+                pub fn free(self, rcc: &mut Rcc) -> ($SPIX, PINS) {
+                    self.spi.cr1.write(|w| w.spe().clear_bit());
+                    // Disable clock for SPI
+                    rcc.rb.$apbXenr.modify(|_, w| w.$spiXen().clear_bit());
                     (self.spi, self.pins)
                 }
             }
