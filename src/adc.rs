@@ -166,6 +166,7 @@ impl Adc<Ready> {
         trigger: Option<Trigger>,
         dma: &mut dma::Handle,
         dma_chan: DmaChan,
+        dma_interrupts: dma::Interrupts,
         buffer: Pin<Buf>,
     ) -> Adc<Active<DmaChan, Buf>>
     where
@@ -199,7 +200,7 @@ impl Adc<Ready> {
 
         // Safe, because the trait bounds of this method guarantee that the
         // buffer can be written to.
-        let transfer = unsafe {
+        let mut transfer = unsafe {
             dma::Transfer::new(
                 dma,
                 dma_token,
@@ -211,8 +212,9 @@ impl Adc<Ready> {
                 dma::Direction::peripheral_to_memory(),
                 true,
             )
-        }
-        .start();
+        };
+        transfer.enable_interrupts(dma_interrupts);
+        let transfer = transfer.start();
 
         let continous = trigger.is_none();
 
@@ -471,6 +473,8 @@ struct Buffer {
     /// `true` until the read position also wraps around.
     r_gt_w: bool,
 }
+
+unsafe impl Send for Buffer{}
 
 impl Buffer {
     fn read<T, C, B>(
